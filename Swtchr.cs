@@ -211,6 +211,7 @@ class App : ApplicationContext {
     bool switchLayout = true, ignoreRdp = true, autoSwitch = true;
     bool debug;
     static string logPath;         // debug=1 в ini — журнал в Swtchr.log
+    void SetDebug(bool on) { debug = on; logPath = on ? Path.Combine(dir, "Swtchr.log") : null; }
     static readonly Stopwatch clock = Stopwatch.StartNew();
     static void Log(string msg) {
         if (logPath == null) return;
@@ -313,7 +314,9 @@ class App : ApplicationContext {
         "; пробел ещё раз после слова — перебить слово, ещё раз — всю строку, ещё раз — всё обратно (1 / 0).\r\n" +
         "; Включается либо auto_switch, либо space_switch: при обоих = 1 работает auto_switch\r\n" +
         "space_switch=" + (spaceKey ? "1" : "0") + "\r\n" +
-        (debug ? "\r\n; журнал в Swtchr.log (для отладки)\r\ndebug=1\r\n" : "");
+        "\r\n" +
+        "; журнал в Swtchr.log — для отладки (1 / 0)\r\n" +
+        "debug=" + (debug ? "1" : "0") + "\r\n";
     }
 
     void SaveConfig() {
@@ -343,7 +346,7 @@ class App : ApplicationContext {
         autoSwitch = cfg["auto_switch"] != "0";
         spaceKey = cfg["space_switch"] != "0" && !autoSwitch;   // включён может быть только один из режимов
         debug = cfg["debug"] == "1";
-        logPath = debug ? Path.Combine(dir, "Swtchr.log") : null;
+        SetDebug(debug);
     }
 
     void LoadIgnore() {
@@ -424,11 +427,12 @@ class App : ApplicationContext {
         if (settingsOpen) return;
         settingsOpen = true;
         try {
-            using (var f = new SettingsForm(keyText, switchLayout, ignoreRdp, autoSwitch, spaceKey, IsAutostart(), tray.Icon)) {
+            using (var f = new SettingsForm(keyText, switchLayout, ignoreRdp, autoSwitch, spaceKey, IsAutostart(), debug, tray.Icon)) {
                 if (f.ShowDialog() != DialogResult.OK) return;
                 try { SetKey(f.Key); }
                 catch (Exception ex) { MessageBox.Show("Клавиша: " + ex.Message, "Swtchr"); return; }
                 switchLayout = f.SwitchLayout; ignoreRdp = f.IgnoreRdp; autoSwitch = f.AutoSwitch; spaceKey = f.SpaceSwitch; spaceCycle = 0;
+                if (f.Debug != debug) { SetDebug(f.Debug); Log("журнал включён"); }
                 SetAutostart(f.Autostart);
                 lastWnd = IntPtr.Zero;   // чтобы isRdp пересчитался с новым ignore_rdp
                 SaveConfig();
@@ -1064,21 +1068,22 @@ class SettingsForm : Form {
     static readonly string[] KeyNames = { "LShift", "RShift", "Shift", "LCtrl", "RCtrl", "Ctrl", "LAlt", "RAlt", "Alt", "LWin", "RWin", "Win",
         "Ctrl+Shift", "LCtrl+LShift", "RCtrl+RShift", "Alt+Shift", "Ctrl+Alt" };
     readonly ComboBox key = new ComboBox();
-    readonly CheckBox cbLayout = new CheckBox(), cbRdp = new CheckBox(), cbAuto = new CheckBox(), cbAutoSw = new CheckBox(), cbSpace = new CheckBox();
+    readonly CheckBox cbLayout = new CheckBox(), cbRdp = new CheckBox(), cbAuto = new CheckBox(), cbAutoSw = new CheckBox(), cbSpace = new CheckBox(), cbDebug = new CheckBox();
 
     public string Key { get { return key.Text; } }
     public bool SwitchLayout { get { return cbLayout.Checked; } }
     public bool IgnoreRdp { get { return cbRdp.Checked; } }
     public bool AutoSwitch { get { return cbAutoSw.Checked; } }
     public bool SpaceSwitch { get { return cbSpace.Checked; } }
+    public bool Debug { get { return cbDebug.Checked; } }
     public bool Autostart { get { return cbAuto.Checked; } }
 
-    public SettingsForm(string keyName, bool switchLayout, bool ignoreRdp, bool autoSwitch, bool spaceSwitch, bool autostart, Icon icon) {
+    public SettingsForm(string keyName, bool switchLayout, bool ignoreRdp, bool autoSwitch, bool spaceSwitch, bool autostart, bool debug, Icon icon) {
         Text = "Swtchr — настройки"; Icon = icon;
         FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen; ShowInTaskbar = false; TopMost = true;
         AutoScaleMode = AutoScaleMode.Font; Font = new Font("Segoe UI", 9.5f);
-        ClientSize = new Size(400, 262);
+        ClientSize = new Size(400, 288);
 
         int y = 14;
         Add(new Label { Text = "Клавиша или сочетание через «+» (нажать и отпустить):", AutoSize = true, Location = new Point(14, y) });
@@ -1111,9 +1116,12 @@ class SettingsForm : Form {
         y += 26;
         cbAuto.Text = "Запускать вместе с Windows"; cbAuto.Checked = autostart;
         cbAuto.AutoSize = true; cbAuto.Location = new Point(14, y); Add(cbAuto);
+        y += 26;
+        cbDebug.Text = "Вести журнал (Swtchr.log, для отладки)"; cbDebug.Checked = debug;
+        cbDebug.AutoSize = true; cbDebug.Location = new Point(14, y); Add(cbDebug);
 
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(206, 222), Size = new Size(84, 28) };
-        var cancel = new Button { Text = "Отмена", DialogResult = DialogResult.Cancel, Location = new Point(298, 222), Size = new Size(84, 28) };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(206, 248), Size = new Size(84, 28) };
+        var cancel = new Button { Text = "Отмена", DialogResult = DialogResult.Cancel, Location = new Point(298, 248), Size = new Size(84, 28) };
         Add(ok); Add(cancel);
         AcceptButton = ok; CancelButton = cancel;
     }
