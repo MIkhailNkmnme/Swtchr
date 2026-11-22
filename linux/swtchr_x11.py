@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Swtchr for Debian/XFCE/X11 — experimental manual layout correction.
 
-Ctrl+Shift (press and release with no other key): word -> line -> restore.
+Ctrl+Shift (press and release with no other key): one more word each time -> restore.
 No text is persisted or sent anywhere. Requires an X11 session.
 """
 
@@ -96,78 +96,107 @@ EXCLUDED = ("terminal", "xterm", "kitty", "alacritty", "konsole", "wezterm", "ur
 
 
 class Corrector:
+    """Grow a corrected suffix by one word with every press, then restore."""
+
     def __init__(self):
-        self.step = 0
-        self.window = ""
-        self.original_line = ""
+        self.reset()
 
     def reset(self):
-        self.step = 0
+        self.count = 0
         self.window = ""
         self.original_line = ""
+        self.expected_line = ""
+        self.previous_span = 0
+        self.reached_start = False
 
-    def selected(self, key):
-        """Select with keyboard and read X11 PRIMARY (clipboard untouched)."""
-        xkey(key)
+    def select(self, keys):
+        """Select text and read X11 PRIMARY without touching the clipboard."""
+        xkey(keys)
         return selection()
 
-    def replace(self, replacement):
-        if not replacement:
-            return False
-        xtype(replacement)
-        return True
+    def read_line(self):
+        # Highlight from caret to beginning of the current logical line.
+        line = self.select("shift+Home")
+        # Move to the right edge and remove the selection.
+        xkey("Right")
+        return line
+
+    def restore(self):
+        selected = self.select("shift+Home")
+        if selected != self.expected_line:
+            xkey("Right")
+            self.reset()
+            logging.warning("Text changed; refusing to restore")
+            return
+        xtype(self.original_line)
+        self.reset()
+        logging.info("Original line restored")
 
     def activate(self):
         current = focus()
         if not current:
+            self.reset()
             return
         if any(term in focus_class() for term in EXCLUDED):
-            logging.info("Terminal window is excluded in the initial release")
+            logging.info("Terminals are excluded from this prototype")
             self.reset()
             return
-        if self.step and current != self.window:
-            self.reset()
-        if self.step == 0:
-            self.window = current
-            # Save the portion of the line before the caret.
-            self.original_line = self.selected("shift+Home")
-            xkey("Right")
-            if not self.original_line or "\n" in self.original_line:
-                self.reset()
-                return
-            word = self.selected("ctrl+shift+Left")
-            if not word or not self.original_line.rstrip().endswith(word.strip()):
-                xkey("Right")
-                self.reset()
-                return
-            changed = convert_layout(word)
-            if changed == word:
-                xkey("Right")
-                self.reset()
-                return
-            self.replace(changed)
-            self.step = 1
-            logging.info("Word converted; next Ctrl+Shift converts the line")
-        elif self.step == 1:
-            currently = self.selected("shift+Home")
-            if not currently:
-                self.reset()
-                return
-            changed = convert_layout(self.original_line)
-            if changed == currently:
-                xkey("Right")
-                self.reset()
-                return
-            self.replace(changed)
-            self.step = 2
-            logging.info("Line converted; next Ctrl+Shift restores original")
-        else:
-            currently = self.selected("shift+Home")
-            if currently:
-                self.replace(self.original_line)
-            self.reset()
-            logging.info("Original line restored")
 
+        if self.count and current != self.window:
+            self.reset()
+
+        line = self.read_line()
+        if not line or "\n" in line:
+            self.reset()
+            return
+
+        if self.count and line != self.expected_line:
+            # A click, another keystroke or application behaviour broke the cycle.
+            self.reset()
+
+        if self.count and self.reached_start:
+            self.restore()
+            return
+
+        if not self.count:
+            self.window = current
+            self.original_line = line
+            self.expected_line = line
+
+        # Selecting from the right edge, Ctrl+Shift+Left expands the suffix
+        # by precisely one more word on each invocation (editor word rules).
+        for _ in range(self.count + 1):
+            xkey("ctrl+shift+Left")
+        suffix_now = selection()
+
+        if not suffix_now or len(suffix_now) > len(line) or not line.endswith(suffix_now):
+            xkey("Right")
+            self.reset()
+            logging.warning("Cannot safely identify selected word")
+            return
+
+        if self.count and len(suffix_now) <= self.previous_span:
+            # Some editors stop growing before they reach the beginning.
+            xkey("Right")
+            self.restore()
+            return
+
+        # Always recompute from the original, never re-convert already corrected
+        # words, otherwise each repeated press would flip them back.
+        suffix_original = self.original_line[-len(suffix_now):]
+        corrected = convert_layout(suffix_original)
+        if corrected == suffix_now:
+            xkey("Right")
+            self.reset()
+            return
+
+        xtype(corrected)  # Replaces only the highlighted suffix.
+        self.count += 1
+        self.previous_span = len(suffix_now)
+        self.expected_line = line[:-len(suffix_now)] + corrected
+        self.reached_start = len(suffix_now) == len(line)
+        logging.info("Corrected %d word(s)%s", self.count,
+                     "; next press restores" if self.reached_start else "")
 
 class Listener:
     def __init__(self):
@@ -200,22 +229,28 @@ class Listener:
                 logging.exception("Conversion failed")
                 self.corrector.reset()
             finally:
-                self.ignore_until = time.monotonic() + 0.45
+                self.ignore_until = time.monotonic() + 0.12
                 self.busy = False
                 self.jobs.task_done()
 
     def handle(self, reply):
         from Xlib import X
         from Xlib.protocol import rq
-        if reply.category != 0 or not reply.data or self.busy:
+        if reply.category != 0 or not reply.data:
             return
         data = reply.data
         while data:
             event, data = rq.EventField(None).parse_binary_value(
                 data, self.record_display.display, None, None)
-            if time.monotonic() < self.ignore_until:
-                continue
             key = event.detail
+            # Even while converting, observe modifier releases so held-state
+            # does not get stuck after the first Ctrl+Shift activation.
+            if self.busy or time.monotonic() < self.ignore_until:
+                if event.type == X.KeyRelease and key in self.ctrl | self.shift:
+                    self.held.discard(key)
+                    if not self.held:
+                        self.armed = self.combo = self.dirty = False
+                continue
             if event.type == X.ButtonPress:
                 self.armed = False
                 self.dirty = True
@@ -258,7 +293,7 @@ class Listener:
                 "device_events": (X.KeyPress, X.ButtonPress),
                 "errors": (0, 0), "client_started": False, "client_died": False,
             }])
-        logging.info("Swtchr X11 running: Ctrl+Shift -> word / line / restore")
+        logging.info("Swtchr X11 running: Ctrl+Shift -> one more word per press -> restore")
         try:
             self.record_display.record_enable_context(context, self.handle)
         finally:
