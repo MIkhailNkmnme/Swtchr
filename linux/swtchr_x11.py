@@ -252,7 +252,8 @@ class Listener:
         context = self.record_display.record_create_context(
             0, [record.AllClients], [{
                 "core_requests": (0, 0), "core_replies": (0, 0),
-                "ext_requests": (0, 0), "ext_replies": (0, 0),
+                "ext_requests": {"major_range": (0, 0), "minor_range": (0, 0)},
+                "ext_replies": {"major_range": (0, 0), "minor_range": (0, 0)},
                 "delivered_events": (0, 0),
                 "device_events": (X.KeyPress, X.ButtonPress),
                 "errors": (0, 0), "client_started": False, "client_died": False,
