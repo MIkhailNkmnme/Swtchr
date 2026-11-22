@@ -112,6 +112,7 @@ class Corrector:
     def select(self, keys):
         """Select text and read X11 PRIMARY without touching the clipboard."""
         xkey(keys)
+        time.sleep(0.13)  # Give X11 PRIMARY selection owner time to update.
         return selection()
 
     def read_line(self):
@@ -133,8 +134,10 @@ class Corrector:
         logging.info("Original line restored")
 
     def activate(self):
+        logging.info("Ctrl+Shift recognized; attempting conversion")
         current = focus()
         if not current:
+            logging.warning("Cannot find focused window")
             self.reset()
             return
         if any(term in focus_class() for term in EXCLUDED):
@@ -147,11 +150,12 @@ class Corrector:
 
         line = self.read_line()
         if not line or "\n" in line:
+            logging.warning("No suitable line selected (caret must be after text)")
             self.reset()
             return
 
         if self.count and line != self.expected_line:
-            # A click, another keystroke or application behaviour broke the cycle.
+            logging.info("Text or caret changed; starting a new correction cycle")
             self.reset()
 
         if self.count and self.reached_start:
@@ -187,6 +191,7 @@ class Corrector:
         corrected = convert_layout(suffix_original)
         if corrected == suffix_now:
             xkey("Right")
+            logging.info("No characters to convert in selected word")
             self.reset()
             return
 
