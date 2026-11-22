@@ -13,7 +13,7 @@ import sys
 import threading
 import time
 
-EN_L = "\`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./"
+EN_L = "`1234567890-=qwertyuiop[]\\asdfghjkl;'zxcvbnm,./"
 RU_L = "ё1234567890-=йцукенгшщзхъ\\фывапролджэячсмитьбю."
 EN_U = '~!@#$%^&*()_+QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>?'
 RU_U = 'Ё!"№;%:?*()_+ЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,'
