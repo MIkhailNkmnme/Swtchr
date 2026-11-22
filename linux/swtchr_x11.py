@@ -118,14 +118,15 @@ class Corrector:
     def read_line(self):
         # Highlight from caret to beginning of the current logical line.
         line = self.select("shift+Home")
-        # Move to the right edge and remove the selection.
-        xkey("Right")
+        # Explicit End is important: Right may move only one character
+        # from the start after Shift+Home in some X11 text widgets.
+        xkey("End")
         return line
 
     def restore(self):
         selected = self.select("shift+Home")
         if selected != self.expected_line:
-            xkey("Right")
+            xkey("End")
             self.reset()
             logging.warning("Text changed; refusing to restore")
             return
@@ -150,7 +151,7 @@ class Corrector:
 
         line = self.read_line()
         if not line or "\n" in line:
-            logging.warning("No suitable line selected (caret must be after text)")
+            logging.warning("No suitable line selected (try Mousepad with cursor after text)")
             self.reset()
             return
 
@@ -171,17 +172,19 @@ class Corrector:
         # by precisely one more word on each invocation (editor word rules).
         for _ in range(self.count + 1):
             xkey("ctrl+shift+Left")
+        time.sleep(0.13)
         suffix_now = selection()
+        logging.info("Selection lengths: line=%d, suffix=%d", len(line), len(suffix_now))
 
         if not suffix_now or len(suffix_now) > len(line) or not line.endswith(suffix_now):
-            xkey("Right")
+            xkey("End")
             self.reset()
             logging.warning("Cannot safely identify selected word")
             return
 
         if self.count and len(suffix_now) <= self.previous_span:
             # Some editors stop growing before they reach the beginning.
-            xkey("Right")
+            xkey("End")
             self.restore()
             return
 
@@ -190,7 +193,7 @@ class Corrector:
         suffix_original = self.original_line[-len(suffix_now):]
         corrected = convert_layout(suffix_original)
         if corrected == suffix_now:
-            xkey("Right")
+            xkey("End")
             logging.info("No characters to convert in selected word")
             self.reset()
             return
